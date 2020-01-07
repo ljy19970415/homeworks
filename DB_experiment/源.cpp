@@ -8,6 +8,8 @@ using namespace std;
 #define FILESIZE 500000
 int totalIO = 0;  //总IO次数
 int leftFrame = BUFSIZE; //剩余空闲的frame
+int hitCount = 0;  //命中次数
+int missCount = 0; //没有命中次数
 
 //一个frame
 typedef struct bFrame
@@ -86,7 +88,7 @@ int writeDirtys()
 		if (start->dirty == true)
 		{
 			//cout << "writePage " << start->page_id << endl;
-			writePage(start, start->page_id);
+			writePage(start, start->page_id);  //将buffer中所有被修改的页写回，io++
 			finalWrite++;
 		}
 		BCB* temp = start->next;
@@ -159,7 +161,7 @@ void removeHashEle(int page_id)
 }
 //将新页插入LRU队首，动态生成frame地址，更新BCB* tail位置，返回刚插入的元素在LRU链表中的地址 
 //bingo
-BCB* insertLRUEle(int page_id)
+BCB* insertLRUEle(int page_id,int operation)
 {
 	BCB* latestFrame = (BCB*)malloc(sizeof(BCB));
 	bFrame* temp = (bFrame*)malloc(sizeof(bFrame));
@@ -177,7 +179,10 @@ BCB* insertLRUEle(int page_id)
 		latestFrame->next = head;
 		head->former = latestFrame;
 	}
-	readPage(latestFrame, page_id);
+	if (!operation)
+	{
+		readPage(latestFrame, page_id); //将新页读入buffer,io++
+	}
 	head = latestFrame;
 	return head;
 }
@@ -213,16 +218,20 @@ void updateLRU(BCB* LRUpos)
 }
 //将LRU队尾元素的page换为当前请求的page
 //bingo
-BCB* selectVictim(int page_id)
+BCB* selectVictim(int page_id,int operation)
 {
+	missCount++;
 	BCB* pos=tail;
 	if (pos->dirty == true)
-		writePage(tail, page_id);
+		writePage(tail, page_id);  //将修改过的页写回，io++
 	removeHashEle(pos->page_id);  //将openHash中该page移除
 	insertHashEle(page_id, pos); //将新页插入openHash中
 	pos->page_id = page_id;
 	pos->dirty = false;
-	readPage(pos, page_id);  //读入新页
+	if (!operation)  //若不为写操作，则读入新页
+	{
+		readPage(pos, page_id);  //将新页读入buffer，io++
+	}
 	updateLRU(pos);
 	return pos;
 }
@@ -234,23 +243,24 @@ void setDirty(BCB* LRU_address)
 }
 //查询page_id是否在buffer中，有则返回，无则替换
 //bingo
-BCB* FixPage(int page_id)
+BCB* FixPage(int page_id,int operation)
 {
 	//查找openHash中是否有此page
 	frame* position = searchHashTable(page_id);
 	if (position != NULL)  //该页已在buffer中
 	{
+		hitCount++;
 		updateLRU(position->LRU_pos);  //更新页在LRU中的位置
 		return position->LRU_pos;
 	}
     else  //若页不在buffer中
     {
         if (leftFrame == 0)  //若buffer满了，则选页替换
-            return selectVictim(page_id);
+            return selectVictim(page_id,operation);
         else   //若buffer没满
 		{
 			//分配新的frame地址给页，将此页插入LRU表
-			BCB* newFrame = insertLRUEle(page_id);
+			BCB* newFrame = insertLRUEle(page_id,operation);
 			//在openHash中登记此页的信息
 			insertHashEle(page_id, newFrame);
 			leftFrame--;
@@ -303,7 +313,7 @@ int main()
 		instream >> c;
 		instream >> page_id;
 		totallines++;
-		BCB* LRU_address = FixPage(page_id);
+		BCB* LRU_address = FixPage(page_id,operation);
 		if (operation)  //若为写操作
 		{
 			setDirty(LRU_address);
@@ -316,5 +326,7 @@ int main()
 	cout << "总共有" << totallines << "条记录" << endl;
 	cout << "程序结束时写回" << writeDirtys() << "条记录" << endl;
 	cout << "totalIO=" << totalIO << endl;
+	cout << "命中次数为" << hitCount << endl;
+	cout << "没有命中次数为" << missCount << endl;
 }
 
